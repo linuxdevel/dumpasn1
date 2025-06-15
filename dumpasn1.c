@@ -8,7 +8,7 @@
    misplaced.
 
    Available from https://www.cs.auckland.ac.nz/~pgut001/dumpasn1.c. Last
-   updated 22 April 2021 (version 20210422, if you prefer it that way,
+   updated 6 June 2025 (version 20250606, if you prefer it that way,
    see also UPDATE_STRING below).  To build under Windows, use 
    'cl /MD dumpasn1.c'.  To build on OS390 or z/OS, use 
    '/bin/c89 -D OS390 -o dumpasn1 dumpasn1.c'.
@@ -69,8 +69,8 @@
 
 /* The update string, printed as part of the help screen */
 
-#define UPDATE_YEAR		"2021"
-#define UPDATE_STRING	"22 April 2021"
+#define UPDATE_YEAR		"2025"
+#define UPDATE_STRING	"6 June 2025"
 
 /* Useful defines */
 
@@ -181,6 +181,7 @@
 
 #ifdef _MSC_VER
   #pragma warning( disable: 4018 )
+  #pragma warning( disable: 4267 )
   #pragma warning( disable: 4996 )
 #endif /* VC++ */
 
@@ -1208,6 +1209,14 @@ static int printString( const int level, const char *format, ... )
 
 /* Indent a string by the appropriate amount */
 
+static int getIndentSize( const int level )
+	{
+	const int cappedLevel = \
+		( level >= maxNestLevel ) ? maxNestLevel : level;
+
+	return( shallowIndent ? cappedLevel : cappedLevel * 2 );
+	}
+
 static void doIndent( const int level )
 	{
 	int i;
@@ -1947,27 +1956,29 @@ static void dumpBitString( FILE *inFile, const int length, const int unused,
 		complain( errorStr, 0, level );
 	}
 
-/* Display data as a text string up to a maximum of 240 characters (8 lines
-   of 48 chars to match the hex limit of 8 lines of 16 bytes) with special
-   treatement for control characters and other odd things that can turn up
-   in BMPString and UniversalString types.
+/* Display data as a text string up to a maximum of, for standard 80-char 
+   output, 240 characters (8 lines of 48 chars to match the hex limit of 8 
+   lines of 16 bytes) with special treatement for control characters and 
+   other odd things that can turn up in BMPString and UniversalString types.
 
    If the string is less than 40 chars in length, we try to print it on the
    same line as the rest of the text (even if it wraps), otherwise we break
-   it up into 48-char chunks in a somewhat less nice text-dump format */
+   it up into 48-char chunks in a somewhat less nice text-dump format.
+   
+   For shorter line lengths we try and shorten the output to fit, moving
+   margins around as required, with a minimum of 8 chars output */
 
 static void displayString( FILE *inFile, long length, int level,
 						   const STR_OPTION strOption )
 	{
 	char timeStr[ 64 ];
 	long noBytes = length;
-	int lineLength = 48, i;
+	int lineLength, i;
 	int firstTime = TRUE, doTimeStr = FALSE, warnIA5 = FALSE;
 	int warnPrintable = FALSE, warnTime = FALSE, warnBMP = FALSE;
 	int warnTimeT = FALSE, warnTimeCrazy = FALSE, warnTimeCrazyAlt = FALSE;
 
-	if( noBytes > 384 && !printAllData )
-		noBytes = 384;	/* Only output a maximum of 384 bytes */
+	/* Set up various initial conditions */
 	if( strOption == STR_UTCTIME || strOption == STR_GENERALIZED )
 		{
 		if( ( strOption == STR_UTCTIME && length != 13 ) || \
@@ -1978,7 +1989,19 @@ static void displayString( FILE *inFile, long length, int level,
 		}
 	if( !doTimeStr && length <= 40 )
 		printString( level, "%s", " '" );	/* Print string on same line */
-	level = adjustLevel( level, ( doPure ) ? 15 : 8 );
+
+	/* Calculate how long each output line will be, adjusting margins to 
+	   make sure that at least some output fits even if it means moving
+	   things around a bit */
+	level = adjustLevel( level, doPure ? 15 : 8 );
+	lineLength = outputWidth - \
+				 ( INDENT_SIZE + getIndentSize( level + 1 ) + 3 );
+								 /* ' + ' + SPC */
+	if( lineLength < 8 )
+		lineLength = 8;				/* Always output at least 8 chars */
+	if( noBytes > ( lineLength * 8 ) && !printAllData )
+		noBytes = lineLength * 8;	/* Only output a maximum of 8 lines */
+
 	for( i = 0; i < noBytes; i++ )
 		{
 		int ch;
@@ -2136,9 +2159,9 @@ static void displayString( FILE *inFile, long length, int level,
 			printString( level, "%c", ch );
 		fPos++;
 		}
-	if( length > 384 && !printAllData )
+	if( length > noBytes && !printAllData )
 		{
-		length -= 384;
+		length -= noBytes;
 		printString( level, "%s", "'\n" );
 		if( !doPure )
 			printString( level, "%s", INDENT_STRING );
@@ -3572,6 +3595,9 @@ int main( int argc, char *argv[] )
 					break;
 
 				case 'W':
+					/* This is best-effort since we're not a roff, for 
+					   example long OID names can go past the output 
+					   width */
 					outputWidth = atoi( argPtr + 1 );
 					if( outputWidth < 40 || outputWidth > 500 )
 						{
