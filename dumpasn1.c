@@ -1538,7 +1538,7 @@ static void dumpHex( FILE *inFile, long length, int level,
 	long noBytes = length;
 	int singleLine = FALSE, warnPadding = FALSE; 
 	int warnNegative = ( option == DUMPHEX_INTEGER ) ? TRUE : FALSE;
-	int displayLength = displayHeaderLength, prevCh = -1, lastCh, i;
+	int displayLength = displayHeaderLength, prevCh = -1, lastCh = 0, i;
 
 	memset( printable, 0, 9 );
 
@@ -1896,7 +1896,7 @@ static void dumpBitString( FILE *inFile, const int length, const int unused,
 			bitFlag <<= 1;
 			bitString <<= 1;
 			}
-		if( noBits < sizeof( int ) && \
+		if( noBits < (int)sizeof( int ) && \
 			( ( remainderMask << noBits ) & value ) && \
 			errorStr != NULL )
 			{
@@ -1914,7 +1914,7 @@ static void dumpBitString( FILE *inFile, const int length, const int unused,
 			/* The last valid bit should be a one bit */
 			errorStr = "Spurious zero bits in bitstring";
 			}
-		if( noBits < sizeof( int ) && \
+		if( noBits < (int)sizeof( int ) && \
 			( ( 0xFF >> ( 8 - unused ) ) & value ) && \
 			errorStr != NULL )
 			{
@@ -2910,7 +2910,7 @@ static void printASN1object( FILE *inFile, ASN1_ITEM *item, int level )
 					complainLengthCanonical( item, level );
 				return;
 				}
-			if( item->length <= sizeof( int ) )
+			if( item->length <= (long)sizeof( int ) )
 				{
 				/* It's short enough to be a bit flag, dump it as a sequence
 				   of bits */
@@ -2993,7 +2993,7 @@ static void printASN1object( FILE *inFile, ASN1_ITEM *item, int level )
 				/* Check if LHS status info + indent + "OID " string + oid
 				   name + "(" + oid value + ")" will wrap */
 				if( ( ( doPure ) ? 0 : INDENT_SIZE ) + ( level * 2 ) + 18 + \
-					strlen( oidInfo->description ) + 2 + length >= outputWidth )
+					(int)strlen( oidInfo->description ) + 2 + (int)length >= outputWidth )
 					{
 					printString( level, "%c", '\n' );
 					if( !doPure )
@@ -3575,7 +3575,8 @@ int main( int argc, char *argv[] )
 #elif defined( __UNIX__ )
 					/* Safety feature in case any Unix libc is as broken
 					   as the Win32 version */
-					( void ) freopen( "/dev/null", "w", stdout );
+					FILE *devnull = freopen( "/dev/null", "w", stdout );
+					(void)devnull;
 #else
 					fclose( stdout );
 #endif /* OS-specific bypassing of stdout */
@@ -3714,7 +3715,8 @@ int main( int argc, char *argv[] )
 		   have to stop at min( data_end, EOCs ).  To avoid false positives,
 		   we skip at least 4 EOCs worth of data and if there's still more
 		   present, we complain */
-		( void ) fread( buffer, 1, 8, inFile );		/* Skip 4 EOCs */
+		size_t bytesRead = fread( buffer, 1, 8, inFile );		/* Skip 4 EOCs */
+		(void)bytesRead;
 		if( !feof( inFile ) )
 			{
 			warn( "Further data follows ASN.1 data at position %ld.\n", 
