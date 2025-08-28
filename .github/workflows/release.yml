@@ -62,7 +62,11 @@ jobs:
         run: |
           Compress-Archive -Path dumpasn1.exe,dumpasn1.cfg -DestinationPath dumpasn1-Windows-x86_64.zip
           $files = 'dumpasn1-Windows-x86_64.zip','dumpasn1.exe','dumpasn1.cfg'
-          foreach ($f in $files) { (Get-FileHash -Algorithm SHA256 -Path $f | ForEach-Object {"$($_.Hash)  $f"}) } | Out-File checksums-Windows.txt -Encoding ascii
+          if (Test-Path checksums-Windows.txt) { Remove-Item checksums-Windows.txt }
+          foreach ($f in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $f).Hash
+            "$hash  $f" | Out-File checksums-Windows.txt -Append -Encoding ascii
+          }
 
       - name: Upload raw artifacts (Linux / macOS)
         if: runner.os != 'Windows'
