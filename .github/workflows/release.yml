@@ -32,6 +32,12 @@ jobs:
         run: |
           choco install make --no-progress -y
 
+      - name: Set up Developer Command Prompt for VS (MSVC)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build (Windows via makefile)
         if: runner.os == 'Windows'
         shell: cmd
