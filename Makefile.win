@@ -1,0 +1,15 @@
+CC = cl
+CFLAGS = /O2 /W3
+TARGET = dumpasn1.exe
+SRC = dumpasn1.c
+CONFIG_FILE = dumpasn1.cfg
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) /Fe$(TARGET) $(SRC)
+
+clean:
+	-del /f $(TARGET) 2> NUL || exit 0
+
+.PHONY: all clean
