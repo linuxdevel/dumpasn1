@@ -16,6 +16,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,20 +50,22 @@ jobs:
       - name: Package (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
-          tar czf dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg
+          ARCHIVE="dumpasn1-${TAG}-${RUNNER_OS}-x86_64.tar.gz"
+          tar czf "$ARCHIVE" dumpasn1 dumpasn1.cfg
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
+            sha256sum "$ARCHIVE" dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
           else
             # macOS fallback
-            shasum -a 256 dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
+            shasum -a 256 "$ARCHIVE" dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
           fi
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          Compress-Archive -Path dumpasn1.exe,dumpasn1.cfg -DestinationPath dumpasn1-Windows-x86_64.zip
-          $files = 'dumpasn1-Windows-x86_64.zip','dumpasn1.exe','dumpasn1.cfg'
+          $zip = "dumpasn1-$env:TAG-Windows-x86_64.zip"
+          Compress-Archive -Path dumpasn1.exe,dumpasn1.cfg -DestinationPath $zip
+          $files = $zip,'dumpasn1.exe','dumpasn1.cfg'
           if (Test-Path checksums-Windows.txt) { Remove-Item checksums-Windows.txt }
           foreach ($f in $files) {
             $hash = (Get-FileHash -Algorithm SHA256 -Path $f).Hash
@@ -93,8 +97,8 @@ jobs:
         with:
           name: dumpasn1-${{ runner.os }}-archive
           path: |
-            dumpasn1-${{ runner.os }}-x86_64.tar.gz
-            dumpasn1-Windows-x86_64.zip
+            dumpasn1-${{ env.TAG }}-${{ runner.os }}-x86_64.tar.gz
+            dumpasn1-${{ env.TAG }}-Windows-x86_64.zip
             checksums-${{ runner.os }}.txt
           if-no-files-found: ignore
 
@@ -102,6 +106,8 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -112,6 +118,23 @@ jobs:
         run: |
           ls -R artifacts
 
+      - name: Prepare release assets (deduplicate & rename)
+        run: |
+          set -e
+          mkdir -p upload
+          # Archives
+          cp artifacts/dumpasn1-Linux-archive/dumpasn1-${TAG}-Linux-x86_64.tar.gz upload/ 2>/dev/null || true
+          cp artifacts/dumpasn1-macOS-archive/dumpasn1-${TAG}-macOS-x86_64.tar.gz upload/ 2>/dev/null || true
+          cp artifacts/dumpasn1-Windows-archive/dumpasn1-${TAG}-Windows-x86_64.zip upload/ 2>/dev/null || true
+          # (Raw binaries and config omitted from release assets)
+          # Checksums (rename to lowercase OS)
+          [ -f artifacts/dumpasn1-Linux-archive/checksums-Linux.txt ] && cp artifacts/dumpasn1-Linux-archive/checksums-Linux.txt upload/checksums-linux.txt
+          [ -f artifacts/dumpasn1-macOS-archive/checksums-macOS.txt ] && cp artifacts/dumpasn1-macOS-archive/checksums-macOS.txt upload/checksums-macos.txt
+            # Windows checksums
+          [ -f artifacts/dumpasn1-Windows-archive/checksums-Windows.txt ] && cp artifacts/dumpasn1-Windows-archive/checksums-Windows.txt upload/checksums-windows.txt || \
+          [ -f artifacts/dumpasn1-Windows-raw/checksums-Windows.txt ] && cp artifacts/dumpasn1-Windows-raw/checksums-Windows.txt upload/checksums-windows.txt
+          echo "Prepared assets:" && ls -1 upload
+
       - name: Generate release notes (simple)
         id: notes
         run: |
@@ -119,8 +142,8 @@ jobs:
           {
             echo "dumpasn1 release $TAG"
             echo
-            echo "Assets:" 
-            find artifacts -type f -maxdepth 2 -print | sed 's#artifacts/##'
+            echo "Included assets (archives + checksums only):" 
+            ls -1 upload
           } > RELEASE_NOTES.md
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           cat RELEASE_NOTES.md >> $GITHUB_OUTPUT
@@ -133,12 +156,9 @@ jobs:
           name: dumpasn1 ${{ github.ref_name }}
           body: ${{ steps.notes.outputs.notes }}
           files: |
-            artifacts/**/dumpasn1-*-x86_64.tar.gz
-            artifacts/**/dumpasn1-Windows-x86_64.zip
-            artifacts/**/dumpasn1
-            artifacts/**/dumpasn1.exe
-            artifacts/**/dumpasn1.cfg
-            artifacts/**/checksums-*.txt
+            upload/dumpasn1-*.tar.gz
+            upload/dumpasn1-*.zip
+            upload/checksums-*.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
