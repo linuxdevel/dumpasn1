@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # needed for creating releases
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          make clean || true
+          make
+          file dumpasn1 || true
+
+      - name: Install make (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install make --no-progress -y
+
+      - name: Build (Windows via makefile)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          make -f Makefile.win clean || exit 0
+          make -f Makefile.win
+
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          tar czf dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
+          else
+            # macOS fallback
+            shasum -a 256 dumpasn1-${RUNNER_OS}-x86_64.tar.gz dumpasn1 dumpasn1.cfg > checksums-${RUNNER_OS}.txt
+          fi
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Compress-Archive -Path dumpasn1.exe,dumpasn1.cfg -DestinationPath dumpasn1-Windows-x86_64.zip
+          $files = 'dumpasn1-Windows-x86_64.zip','dumpasn1.exe','dumpasn1.cfg'
+          foreach ($f in $files) { (Get-FileHash -Algorithm SHA256 -Path $f | ForEach-Object {"$($_.Hash)  $f"}) } | Out-File checksums-Windows.txt -Encoding ascii
+
+      - name: Upload raw artifacts (Linux / macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dumpasn1-${{ runner.os }}-raw
+          path: |
+            dumpasn1
+            dumpasn1.cfg
+            checksums-${{ runner.os }}.txt
+
+      - name: Upload raw artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dumpasn1-${{ runner.os }}-raw
+          path: |
+            dumpasn1.exe
+            dumpasn1.cfg
+            checksums-Windows.txt
+
+      - name: Upload packaged archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dumpasn1-${{ runner.os }}-archive
+          path: |
+            dumpasn1-${{ runner.os }}-x86_64.tar.gz
+            dumpasn1-Windows-x86_64.zip
+            checksums-${{ runner.os }}.txt
+          if-no-files-found: ignore
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display downloaded files
+        run: |
+          ls -R artifacts
+
+      - name: Generate release notes (simple)
+        id: notes
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          {
+            echo "dumpasn1 release $TAG"
+            echo
+            echo "Assets:" 
+            find artifacts -type f -maxdepth 2 -print | sed 's#artifacts/##'
+          } > RELEASE_NOTES.md
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat RELEASE_NOTES.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: dumpasn1 ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.notes }}
+          files: |
+            artifacts/**/dumpasn1-*-x86_64.tar.gz
+            artifacts/**/dumpasn1-Windows-x86_64.zip
+            artifacts/**/dumpasn1
+            artifacts/**/dumpasn1.exe
+            artifacts/**/dumpasn1.cfg
+            artifacts/**/checksums-*.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Optional: only run release job if tag starts with v (already filtered) and not a prerelease pattern
+    # Could add conditional logic here if needed for prereleases.
